@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import {
   addDoc,
@@ -1872,6 +1872,7 @@ function App() {
   const [nickname, setNickname] = useState("");
   //시험결과 저장기
   const [savedResult, setSavedResult] = useState(false);
+  const attemptRef = useRef(null);
   const [resultList, setResultList] = useState([]);
   const [totalUsers, setTotalUsers] = useState(0);
   const [resultNickname, setResultNickname] = useState("");
@@ -2049,6 +2050,7 @@ function App() {
 
   const goToNextQuestion = () => {
     if (current < selectedQuiz.length - 1) {
+      setTimeLeft(QUESTION_TIME);
       setCurrent((prev) => prev + 1);
     } else {
       setSubmitted(true);
@@ -2057,6 +2059,7 @@ function App() {
 
   const goToPrevQuestion = () => {
     if (current > 0) {
+      setTimeLeft(QUESTION_TIME);
       setCurrent((prev) => prev - 1);
     }
   };
@@ -2066,6 +2069,7 @@ function App() {
   };
 
   const startQuiz = () => {
+    attemptRef.current = { startedAt: performance.now(), saving: false };
     setCurrent(0);
     setAnswers({});
     setSubmitted(false);
@@ -2075,6 +2079,7 @@ function App() {
   };
 
   const restartQuiz = () => {
+    attemptRef.current = null;
     setStarted(false);
     setCurrent(0);
     setAnswers({});
@@ -2087,6 +2092,8 @@ function App() {
   };
 
   const retryWrongAnswers = (wrongQuestions) => {
+    attemptRef.current = { startedAt: performance.now(), saving: false };
+    setSavedResult(false);
     setRetryQuestions([...wrongQuestions]);
     setQuizMode("wrong");
     setCurrent(0);
@@ -2095,12 +2102,6 @@ function App() {
     setStarted(true);
     setTimeLeft(QUESTION_TIME);
   };
-
-  // 타이머 초기화
-  useEffect(() => {
-    if (!started || submitted || selectedQuiz.length === 0) return;
-    setTimeLeft(QUESTION_TIME);
-  }, [current, started, submitted, selectedQuiz.length]);
 
   // 타이머 감소
   useEffect(() => {
@@ -2141,10 +2142,15 @@ function App() {
 
   //시험결과 저장
   const saveQuizResult = async () => {
-    if (savedResult) return;
+    const attempt = attemptRef.current;
+    if (savedResult || !attempt || attempt.saving) return;
+    attempt.saving = true;
 
     const solvedCount = selectedQuiz.length;
-    const spentSeconds = solvedCount * QUESTION_TIME - timeLeft;
+    const spentSeconds = Math.max(
+      0,
+      Math.round((performance.now() - attempt.startedAt) / 1000)
+    );
 
     const resultData = {
       nickname: nickname.trim() || "익명",
@@ -2161,8 +2167,9 @@ function App() {
     if (db) {
       try {
         await addDoc(collection(db, "quizResults"), resultData);
-        setSavedResult(true);
+        if (attemptRef.current === attempt) setSavedResult(true);
       } catch (error) {
+        attempt.saving = false;
         console.error("시험 결과 저장 실패", error);
       }
     } else {
@@ -2174,7 +2181,7 @@ function App() {
         createdAtText: new Date().toLocaleString(),
       });
       localStorage.setItem("quiz-results", JSON.stringify(localResults));
-      setSavedResult(true);
+      if (attemptRef.current === attempt) setSavedResult(true);
     }
   };
   //if (submitted) 화면에 들어왔을 때 한 번만 저장
